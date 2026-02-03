@@ -24,3 +24,4 @@ npm-debug.log*
 .cache/
 .claude
 notebook.json
+data

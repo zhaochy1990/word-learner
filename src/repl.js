@@ -29,8 +29,24 @@ import {
   displayFlashcardBack,
   displayGradeFeedback,
   displaySessionComplete,
-  displayNoWordsToLearn
+  displayNoWordsToLearn,
+  displayExtractPrompt,
+  displayExtractProgress,
+  displayExtractComplete,
+  displayCETMenu,
+  displayCETFlashcardFront,
+  displayCETFlashcardBack,
+  displayProgressSummary
 } from './ui.js';
+import {
+  isExtracted,
+  extractWordList,
+  getEstimatedCount,
+  getLearningStats as getCETLearningStats,
+  getWordsForLearning as getCETWordsForLearning,
+  updateWordLearningState,
+  getCategoryDisplayName
+} from './cet.js';
 
 // Selection states for multi-step interactions
 const SelectionState = {
@@ -40,7 +56,13 @@ const SelectionState = {
   LEARN_MENU: 'learn_menu',
   FLASHCARD_FRONT: 'flashcard_front',
   FLASHCARD_BACK: 'flashcard_back',
-  SESSION_COMPLETE: 'session_complete'
+  SESSION_COMPLETE: 'session_complete',
+  // CET-specific states
+  CET_EXTRACT_CONFIRM: 'cet_extract_confirm',
+  CET_MENU: 'cet_menu',
+  CET_FLASHCARD_FRONT: 'cet_flashcard_front',
+  CET_FLASHCARD_BACK: 'cet_flashcard_back',
+  CET_SESSION_COMPLETE: 'cet_session_complete'
 };
 
 export class WordLearnerREPL {
@@ -51,6 +73,7 @@ export class WordLearnerREPL {
     this.pendingSelection = SelectionState.NONE;
     this.selectionData = null;
     this.learningSession = null;
+    this.cetCategory = null; // Current CET category ('cet4' or 'cet6')
   }
 
   start() {
@@ -138,6 +161,15 @@ export class WordLearnerREPL {
       case 'learn':
         await this.handleLearn();
         break;
+      case 'cet4':
+        await this.handleCET('cet4');
+        break;
+      case 'cet6':
+        await this.handleCET('cet6');
+        break;
+      case 'progress':
+        this.handleProgress();
+        break;
     }
   }
 
@@ -209,6 +241,21 @@ export class WordLearnerREPL {
         break;
       case SelectionState.SESSION_COMPLETE:
         await this.handleSessionCompleteSelection();
+        break;
+      case SelectionState.CET_EXTRACT_CONFIRM:
+        await this.handleCETExtractConfirm(trimmed);
+        break;
+      case SelectionState.CET_MENU:
+        await this.handleCETMenuSelection(trimmed);
+        break;
+      case SelectionState.CET_FLASHCARD_FRONT:
+        await this.handleCETFlashcardFrontSelection(trimmed);
+        break;
+      case SelectionState.CET_FLASHCARD_BACK:
+        await this.handleCETFlashcardBackSelection(trimmed);
+        break;
+      case SelectionState.CET_SESSION_COMPLETE:
+        await this.handleCETSessionCompleteSelection();
         break;
     }
   }
@@ -368,5 +415,182 @@ export class WordLearnerREPL {
     // Any key continues
     this.learningSession = null;
     this.clearSelection();
+  }
+
+  // ==================== CET Learning Handlers ====================
+
+  /**
+   * Entry point for /cet4 or /cet6 command
+   * @param {string} category - 'cet4' or 'cet6'
+   */
+  async handleCET(category) {
+    this.cetCategory = category;
+
+    if (!isExtracted(category)) {
+      // Need to extract first
+      const estimatedCount = getEstimatedCount(category);
+      displayExtractPrompt(category, estimatedCount);
+      this.pendingSelection = SelectionState.CET_EXTRACT_CONFIRM;
+      this.selectionData = { category };
+    } else {
+      // Word list exists, show menu
+      this.showCETMenu(category);
+    }
+  }
+
+  /**
+   * Handle extraction confirmation
+   * @param {string} input - User input
+   */
+  async handleCETExtractConfirm(input) {
+    const { category } = this.selectionData;
+
+    if (input === 'y' || input === 'yes') {
+      console.log();
+      console.log(chalk.dim('Extracting words from ECDICT...'));
+
+      const count = extractWordList(category, displayExtractProgress);
+      displayExtractComplete(category, count);
+
+      // Show menu after extraction
+      this.showCETMenu(category);
+    } else if (input === 'n' || input === 'no') {
+      this.clearSelection();
+      this.cetCategory = null;
+    } else {
+      console.log(chalk.dim('Press [Y] to extract or [N] to cancel'));
+    }
+  }
+
+  /**
+   * Show CET learning menu
+   * @param {string} category - 'cet4' or 'cet6'
+   */
+  showCETMenu(category) {
+    const stats = getCETLearningStats(category);
+    displayCETMenu(category, stats);
+
+    this.pendingSelection = SelectionState.CET_MENU;
+    this.selectionData = { category, stats };
+  }
+
+  /**
+   * Handle CET menu selection
+   * @param {string} input - User input
+   */
+  async handleCETMenuSelection(input) {
+    const { category } = this.selectionData;
+
+    if (input === 's') {
+      const wordsForLearning = getCETWordsForLearning(category);
+
+      if (wordsForLearning.length === 0) {
+        console.log(chalk.green('\nAll caught up! Come back later.\n'));
+        this.clearSelection();
+        this.cetCategory = null;
+        return;
+      }
+
+      // Start CET learning session
+      this.learningSession = new LearningSession(wordsForLearning);
+      this.showCETCurrentFlashcard();
+    } else if (input === 'b') {
+      this.clearSelection();
+      this.cetCategory = null;
+    } else {
+      console.log(chalk.dim('Press [S] to start or [B] to go back'));
+    }
+  }
+
+  /**
+   * Show current CET flashcard
+   */
+  showCETCurrentFlashcard() {
+    if (this.learningSession.isComplete) {
+      // Session complete
+      const sessionStats = this.learningSession.getStats();
+      displaySessionComplete(sessionStats);
+      this.pendingSelection = SelectionState.CET_SESSION_COMPLETE;
+      return;
+    }
+
+    const word = this.learningSession.currentWord;
+    const { current, total } = this.learningSession.progress;
+
+    displayCETFlashcardFront(word, current, total);
+    this.pendingSelection = SelectionState.CET_FLASHCARD_FRONT;
+  }
+
+  /**
+   * Handle CET flashcard front selection (reveal)
+   * @param {string} input - User input
+   */
+  async handleCETFlashcardFrontSelection(input) {
+    // Space or Enter reveals the answer
+    if (input === '' || input === ' ') {
+      this.learningSession.reveal();
+
+      const word = this.learningSession.currentWord;
+      const { current, total } = this.learningSession.progress;
+
+      displayCETFlashcardBack(word, current, total);
+      this.pendingSelection = SelectionState.CET_FLASHCARD_BACK;
+    } else {
+      console.log(chalk.dim('Press [Space] or [Enter] to reveal'));
+    }
+  }
+
+  /**
+   * Handle CET flashcard back selection (grading)
+   * @param {string} input - User input
+   */
+  async handleCETFlashcardBackSelection(input) {
+    const grade = parseInt(input);
+
+    if (grade >= GRADES.FORGOT && grade <= GRADES.EASY) {
+      const word = this.learningSession.currentWord;
+
+      // Calculate new learning state
+      const newLearning = calculateNextReview(word.learning, grade);
+
+      // Update in CET progress file
+      updateWordLearningState(this.cetCategory, word.word, newLearning);
+
+      // Record grade in session
+      this.learningSession.recordGrade(grade);
+
+      // Show feedback
+      const feedback = getGradeFeedback(grade, newLearning.interval);
+      displayGradeFeedback(feedback, grade);
+
+      // Small delay then show next card
+      setTimeout(() => {
+        this.showCETCurrentFlashcard();
+        this.rl.prompt();
+      }, 800);
+    } else {
+      console.log(chalk.dim('Enter 1-4 to grade your recall'));
+    }
+  }
+
+  /**
+   * Handle CET session complete
+   */
+  async handleCETSessionCompleteSelection() {
+    // Any key continues
+    this.learningSession = null;
+    this.cetCategory = null;
+    this.clearSelection();
+  }
+
+  /**
+   * Handle /progress command - display unified learning statistics
+   */
+  handleProgress() {
+    const notebookStats = this.notebook.getLearningStats();
+    const cet4Stats = isExtracted('cet4') ? getCETLearningStats('cet4') : null;
+    const cet6Stats = isExtracted('cet6') ? getCETLearningStats('cet6') : null;
+
+    displayProgressSummary(notebookStats, cet4Stats, cet6Stats);
   }
 }

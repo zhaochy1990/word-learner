@@ -6,6 +6,7 @@
 
 import { lookupWord } from './ecdict.js';
 import { translateToZh } from './translator.js';
+import { fetchFallbackExamples } from './examples.js';
 
 const FREE_DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 
@@ -18,8 +19,16 @@ export async function fetchFromApi(word) {
   // Try ECDICT first (local, has Chinese translations)
   const ecdictResult = lookupWord(word);
   if (ecdictResult) {
-    // Fetch examples from Free Dictionary API to supplement ECDICT
-    const examplesByPos = await fetchExamplesFromFreeDictionary(word);
+    // Tier 1: Fetch examples from Free Dictionary API to supplement ECDICT
+    let examplesByPos = await fetchExamplesFromFreeDictionary(word);
+
+    // Tier 2: If no examples from Free Dictionary, try Wordnik
+    if (examplesByPos.length === 0) {
+      const fallback = await fetchFallbackExamples(word);
+      if (fallback.examples.length > 0) {
+        examplesByPos = [{ partOfSpeech: 'general', examples: fallback.examples }];
+      }
+    }
 
     if (examplesByPos.length > 0) {
       // Collect all English examples for batch translation
@@ -97,6 +106,16 @@ function mergeExamples(entry, examplesByPos) {
     if (match && def.examples.length === 0) {
       // Limit to max 5 examples per definition
       def.examples = match.examples.slice(0, 5);
+    }
+  }
+
+  // Handle 'general' examples from fallback (Wordnik)
+  // Assign to first definition without examples
+  const generalExamples = examplesByPos.find(e => e.partOfSpeech === 'general');
+  if (generalExamples) {
+    const firstDefWithoutExamples = entry.definitions.find(d => d.examples.length === 0);
+    if (firstDefWithoutExamples) {
+      firstDefWithoutExamples.examples = generalExamples.examples.slice(0, 3);
     }
   }
 }

@@ -44,6 +44,23 @@ function parseMultiline(text) {
 }
 
 /**
+ * Normalize part of speech to group similar types
+ * v, vt, vi → v (verb), n → n (noun), etc.
+ */
+function normalizePartOfSpeech(pos) {
+  const normalized = pos.toLowerCase().replace('.', '');
+  // Group verb variants
+  if (normalized.startsWith('v')) return 'v';
+  // Group noun variants
+  if (normalized.startsWith('n')) return 'n';
+  // Group adjective variants
+  if (normalized.startsWith('adj') || normalized === 'a') return 'adj';
+  // Group adverb variants
+  if (normalized.startsWith('adv')) return 'adv';
+  return normalized || 'other';
+}
+
+/**
  * Parse part of speech from definition line
  * E.g., "n. an expression of greeting" -> { pos: "n.", meaning: "an expression of greeting" }
  */
@@ -79,12 +96,12 @@ export function lookupWord(word) {
   // Build definitions array matching English with Chinese
   const definitions = [];
 
-  // Group by part of speech
+  // Group by normalized part of speech (v, vt, vi all become 'v')
   const defMap = new Map();
 
   for (const line of englishDefs) {
     const { pos, meaning } = parseDefinitionLine(line);
-    const key = pos || 'other';
+    const key = normalizePartOfSpeech(pos);
     if (!defMap.has(key)) {
       defMap.set(key, { meanings: [], meaningsZh: [] });
     }
@@ -94,17 +111,20 @@ export function lookupWord(word) {
   // Add Chinese translations (they follow same structure)
   for (const line of chineseDefs) {
     const { pos, meaning } = parseDefinitionLine(line);
-    const key = pos || 'other';
+    const key = normalizePartOfSpeech(pos);
     if (!defMap.has(key)) {
       defMap.set(key, { meanings: [], meaningsZh: [] });
     }
     defMap.get(key).meaningsZh.push(meaning);
   }
 
-  // Convert to our format
+  // Convert to our format - prefer Chinese over English
   for (const [pos, data] of defMap) {
+    // Skip entries that only have English meaning (no Chinese)
+    if (data.meaningsZh.length === 0) continue;
+
     definitions.push({
-      partOfSpeech: pos.replace('.', '') || 'unknown',
+      partOfSpeech: pos || 'unknown',
       meaning: data.meanings.join('; '),
       meaningZh: data.meaningsZh.join('; '),
       examples: []

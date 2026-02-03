@@ -18,14 +18,9 @@ export function displayWordDetails(wordEntry) {
   console.log();
 
   for (const def of wordEntry.definitions) {
-    // Show part of speech and meaning
+    // Show part of speech and Chinese meaning (preferred)
     const meaning = def.meaningZh || def.meaning || '';
     console.log(chalk.green(`[${def.partOfSpeech}] `) + chalk.white(meaning));
-
-    // If we have English meaning but also want to show it separately
-    if (def.meaningZh && def.meaning && def.meaningZh !== def.meaning) {
-      console.log(chalk.gray(`  ${def.meaning}`));
-    }
 
     if (def.examples && def.examples.length > 0) {
       console.log(chalk.dim('Examples:'));
@@ -109,6 +104,9 @@ export function displayHelp() {
   console.log(chalk.white('  /search <word>  ') + chalk.dim('or') + chalk.white('  /s <word>  ') + chalk.dim('- Search for a word'));
   console.log(chalk.white('  /notebook       ') + chalk.dim('or') + chalk.white('  /n         ') + chalk.dim('- View notebook'));
   console.log(chalk.white('  /learn          ') + chalk.dim('or') + chalk.white('  /l         ') + chalk.dim('- Start learning session'));
+  console.log(chalk.white('  /cet4                        ') + chalk.dim('- Learn CET-4 vocabulary'));
+  console.log(chalk.white('  /cet6                        ') + chalk.dim('- Learn CET-6 vocabulary'));
+  console.log(chalk.white('  /progress       ') + chalk.dim('or') + chalk.white('  /p         ') + chalk.dim('- View learning progress'));
   console.log(chalk.white('  /history                     ') + chalk.dim('- Show search history'));
   console.log(chalk.white('  /clear          ') + chalk.dim('or') + chalk.white('  /c         ') + chalk.dim('- Clear screen'));
   console.log(chalk.white('  /help           ') + chalk.dim('or') + chalk.white('  /h         ') + chalk.dim('- Show this help'));
@@ -295,5 +293,218 @@ export function displayNoWordsToLearn() {
   console.log();
   console.log(chalk.yellow('No words to learn yet!'));
   console.log(chalk.dim('Search for words and save them to your notebook first.'));
+  console.log();
+}
+
+// ==================== CET Learning UI ====================
+
+/**
+ * Display extraction confirmation prompt
+ * @param {string} category - 'cet4' or 'cet6'
+ * @param {number} estimatedCount - Estimated word count
+ */
+export function displayExtractPrompt(category, estimatedCount) {
+  const displayName = category.toUpperCase();
+  console.log();
+  console.log(chalk.yellow(`${displayName} word list not found.`));
+  console.log(chalk.white(`Extract from ECDICT? (~${estimatedCount.toLocaleString()} words)`));
+  console.log();
+  console.log(chalk.cyan('[Y]es  [N]o'));
+}
+
+/**
+ * Display extraction progress
+ * @param {number} current - Current progress
+ * @param {number} total - Total entries
+ */
+export function displayExtractProgress(current, total) {
+  const percent = Math.round((current / total) * 100);
+  process.stdout.write(`\r${chalk.dim(`Processing ECDICT... ${percent}%`)}`);
+}
+
+/**
+ * Display extraction complete message
+ * @param {string} category - 'cet4' or 'cet6'
+ * @param {number} count - Number of words extracted
+ */
+export function displayExtractComplete(category, count) {
+  console.log(); // Clear the progress line
+  console.log(chalk.green(`Extracted ${count.toLocaleString()} ${category.toUpperCase()} words`));
+  console.log();
+}
+
+/**
+ * Display CET learning menu with statistics
+ * @param {string} category - 'cet4' or 'cet6'
+ * @param {Object} stats - Statistics from getLearningStats()
+ */
+export function displayCETMenu(category, stats) {
+  const displayName = category.toUpperCase();
+  console.log();
+  console.log(chalk.cyan(`━━━ ${displayName} Learning ━━━`));
+  console.log(chalk.white(`Total: ${stats.total.toLocaleString()}`) + '  ' +
+              chalk.gray(`New: ${stats.newAvailable.toLocaleString()}`) + '  ' +
+              chalk.green(`Mastered: ${stats.mastered}`));
+  console.log(chalk.white(`Due today: ${stats.dueToday}`));
+  console.log();
+
+  // Display bar chart for each level (compact version)
+  const maxBarLength = 15;
+  const maxCount = Math.max(...stats.byLevel, 1);
+
+  const levelColors = [
+    chalk.gray,      // 0: New
+    chalk.red,       // 1: Learning
+    chalk.yellow,    // 2: Reviewing
+    chalk.blue,      // 3: Familiar
+    chalk.cyan,      // 4: Confident
+    chalk.green      // 5: Mastered
+  ];
+
+  for (let level = 0; level < 6; level++) {
+    const count = stats.byLevel[level];
+    const barLength = Math.round((count / maxCount) * maxBarLength);
+    const bar = '█'.repeat(barLength);
+    const levelName = LEVEL_NAMES[level].padEnd(10);
+    const colorFn = levelColors[level];
+
+    console.log(colorFn(`  ${levelName} ${bar} ${count}`));
+  }
+
+  console.log();
+  console.log(chalk.cyan('[S]tart session  [B]ack'));
+}
+
+/**
+ * Display CET flashcard front (word only, with Collins/Oxford info)
+ * @param {Object} wordEntry - Word entry with learning state
+ * @param {number} current - Current word number
+ * @param {number} total - Total words in session
+ */
+export function displayCETFlashcardFront(wordEntry, current, total) {
+  console.log();
+  console.log(chalk.cyan(`━━━ Word ${current} of ${total} ━━━`));
+  console.log();
+  console.log(chalk.bold.white(`  ${wordEntry.word}`));
+  console.log(chalk.yellow(`  ${wordEntry.pronunciation || ''}`));
+  console.log();
+  console.log(chalk.dim('Press [Space] to reveal answer'));
+}
+
+/**
+ * Display CET flashcard back (word with definitions and metadata)
+ * @param {Object} wordEntry - Word entry
+ * @param {number} current - Current word number
+ * @param {number} total - Total words in session
+ */
+export function displayCETFlashcardBack(wordEntry, current, total) {
+  console.log();
+  console.log(chalk.cyan(`━━━ Word ${current} of ${total} ━━━`));
+  console.log(chalk.bold.white(`${wordEntry.word}  `) + chalk.yellow(wordEntry.pronunciation || ''));
+
+  // Show Collins and Oxford badges
+  const badges = [];
+  if (wordEntry.collins > 0) {
+    badges.push(chalk.magenta(`Collins: ${'★'.repeat(wordEntry.collins)}`));
+  }
+  if (wordEntry.oxford) {
+    badges.push(chalk.blue('Oxford 3000'));
+  }
+  if (badges.length > 0) {
+    console.log(badges.join('  '));
+  }
+
+  console.log(chalk.cyan('─'.repeat(40)));
+
+  for (const def of wordEntry.definitions) {
+    const meaning = def.meaningZh || def.meaning || '';
+    console.log(chalk.green(`[${def.partOfSpeech}] `) + chalk.white(meaning));
+  }
+
+  console.log();
+  console.log(chalk.white('How well did you remember?'));
+  console.log(chalk.red('[1] Forgot') + '  ' +
+              chalk.yellow('[2] Hard') + '  ' +
+              chalk.green('[3] Good') + '  ' +
+              chalk.cyan('[4] Easy'));
+}
+
+// ==================== Progress Summary UI ====================
+
+/**
+ * Display category statistics with level bar chart
+ * @param {string} name - Category display name
+ * @param {Object} stats - Statistics object with total, byLevel, dueToday
+ */
+function displayCategoryStats(name, stats) {
+  console.log(chalk.cyan(`─── ${name} ───`));
+  console.log(chalk.white(`Total: ${stats.total}`) + '  ' +
+              chalk.green(`Mastered: ${stats.byLevel[5]}`) + '  ' +
+              chalk.yellow(`Due: ${stats.dueToday}`));
+
+  // Compact level bar chart
+  const maxBarLength = 12;
+  const maxCount = Math.max(...stats.byLevel, 1);
+  const levelColors = [chalk.gray, chalk.red, chalk.yellow, chalk.blue, chalk.cyan, chalk.green];
+
+  for (let level = 0; level < 6; level++) {
+    const count = stats.byLevel[level];
+    const barLength = Math.round((count / maxCount) * maxBarLength);
+    const bar = '█'.repeat(barLength);
+    const levelName = LEVEL_NAMES[level].padEnd(10);
+    console.log(levelColors[level](`  ${levelName} ${bar} ${count}`));
+  }
+  console.log();
+}
+
+/**
+ * Display unified learning progress summary across all data sources
+ * @param {Object} notebookStats - Statistics from notebook.getLearningStats()
+ * @param {Object|null} cet4Stats - Statistics from getCETLearningStats('cet4') or null
+ * @param {Object|null} cet6Stats - Statistics from getCETLearningStats('cet6') or null
+ */
+export function displayProgressSummary(notebookStats, cet4Stats, cet6Stats) {
+  console.log();
+  console.log(chalk.cyan('━━━ Learning Progress Summary ━━━'));
+  console.log();
+
+  // Calculate totals
+  const total = notebookStats.total + (cet4Stats?.total || 0) + (cet6Stats?.total || 0);
+  const mastered = notebookStats.byLevel[5] + (cet4Stats?.byLevel[5] || 0) + (cet6Stats?.byLevel[5] || 0);
+  const newWords = notebookStats.byLevel[0] + (cet4Stats?.byLevel[0] || 0) + (cet6Stats?.byLevel[0] || 0);
+  const inProgress = total - mastered - newWords;
+  const masteredPercent = total > 0 ? Math.round((mastered / total) * 100) : 0;
+
+  // Overall stats
+  console.log(chalk.white.bold('Overall Progress'));
+  console.log(chalk.white(`  Total words: ${total.toLocaleString()}`));
+  console.log(chalk.green(`  Mastered: ${mastered.toLocaleString()} (${masteredPercent}%)`));
+  console.log(chalk.yellow(`  In progress: ${inProgress.toLocaleString()}`));
+  console.log(chalk.gray(`  New: ${newWords.toLocaleString()}`));
+  console.log();
+
+  // Mastery progress bar
+  const barLength = 30;
+  const filled = Math.round((masteredPercent / 100) * barLength);
+  const bar = chalk.green('█'.repeat(filled)) + chalk.gray('░'.repeat(barLength - filled));
+  console.log(`  Mastery: [${bar}] ${masteredPercent}%`);
+  console.log();
+
+  // Category breakdown
+  displayCategoryStats('Notebook', notebookStats);
+  if (cet4Stats) displayCategoryStats('CET-4', cet4Stats);
+  if (cet6Stats) displayCategoryStats('CET-6', cet6Stats);
+
+  // Due today summary
+  const totalDue = notebookStats.dueToday + (cet4Stats?.dueToday || 0) + (cet6Stats?.dueToday || 0);
+  console.log(chalk.cyan('─── Due Today ───'));
+  if (totalDue === 0) {
+    console.log(chalk.green('All caught up! No words due for review.'));
+  } else {
+    console.log(chalk.white(`Total due: ${totalDue} words`));
+    if (notebookStats.dueToday > 0) console.log(chalk.dim(`  Notebook: ${notebookStats.dueToday}`));
+    if (cet4Stats?.dueToday > 0) console.log(chalk.dim(`  CET-4: ${cet4Stats.dueToday}`));
+    if (cet6Stats?.dueToday > 0) console.log(chalk.dim(`  CET-6: ${cet6Stats.dueToday}`));
+  }
   console.log();
 }
