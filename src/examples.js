@@ -162,15 +162,43 @@ Return ONLY a JSON array in this exact format, no other text:
 const MIN_EXAMPLES = 3;
 
 /**
+ * Normalize example text for comparison (lowercase, trim, remove extra spaces)
+ * @param {string} text - Text to normalize
+ * @returns {string} - Normalized text
+ */
+function normalizeText(text) {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Deduplicate examples based on English sentence
+ * @param {Array<{en: string, zh: string}>} examples - Examples to deduplicate
+ * @param {Set<string>} existingKeys - Set of already seen normalized English sentences
+ * @returns {Array<{en: string, zh: string}>} - Deduplicated examples
+ */
+function deduplicateExamples(examples, existingKeys = new Set()) {
+  const result = [];
+  for (const ex of examples) {
+    const key = normalizeText(ex.en);
+    if (!existingKeys.has(key)) {
+      existingKeys.add(key);
+      result.push(ex);
+    }
+  }
+  return result;
+}
+
+/**
  * Main fallback function: Tier 2a (Wordnik), Tier 2b (Azure Dictionary), Tier 3 (GPT-4.1)
  * Continues fetching from multiple sources until MIN_EXAMPLES (3) are collected
  * (Tier 1 Free Dictionary is handled in api.js before calling this)
  * @param {string} word - The word to get examples for
  * @param {Array} definitions - Definitions array (needed for Azure Dictionary and GPT)
  * @param {number} currentCount - Number of examples already collected from previous tiers
+ * @param {Array<string>} existingExamples - Existing example sentences to avoid duplicates
  * @returns {Promise<{examples: Array<{en: string, zh: string}>, sources: string[]}>}
  */
-export async function fetchFallbackExamples(word, definitions = [], currentCount = 0) {
+export async function fetchFallbackExamples(word, definitions = [], currentCount = 0, existingExamples = []) {
   const allExamples = [];
   const sources = [];
   const needed = MIN_EXAMPLES - currentCount;
@@ -179,29 +207,35 @@ export async function fetchFallbackExamples(word, definitions = [], currentCount
     return { examples: [], sources: [] };
   }
 
+  // Track seen examples to avoid duplicates
+  const seenKeys = new Set(existingExamples.map(normalizeText));
+
   // Tier 2a: Try Wordnik if API key is configured
-  const wordnikExamples = await fetchExamplesFromWordnik(word, needed);
-  if (wordnikExamples.length > 0) {
-    allExamples.push(...wordnikExamples);
+  const wordnikExamples = await fetchExamplesFromWordnik(word, needed + 2); // Fetch extra in case of duplicates
+  const uniqueWordnik = deduplicateExamples(wordnikExamples, seenKeys);
+  if (uniqueWordnik.length > 0) {
+    allExamples.push(...uniqueWordnik);
     sources.push('Wordnik');
   }
 
   // Tier 2b: Try Azure Translator Dictionary if still need more examples
   if (allExamples.length < needed) {
-    const azureLimit = needed - allExamples.length;
+    const azureLimit = (needed - allExamples.length) + 2; // Fetch extra in case of duplicates
     const azureExamples = await fetchExamplesFromAzureDict(word, definitions, azureLimit);
-    if (azureExamples.length > 0) {
-      allExamples.push(...azureExamples);
+    const uniqueAzure = deduplicateExamples(azureExamples, seenKeys);
+    if (uniqueAzure.length > 0) {
+      allExamples.push(...uniqueAzure);
       sources.push('Azure Dictionary');
     }
   }
 
   // Tier 3: Generate with GPT-4.1 if still need more examples
   if (allExamples.length < needed) {
-    const gptLimit = needed - allExamples.length;
+    const gptLimit = (needed - allExamples.length) + 1; // Fetch extra in case of duplicates
     const gptExamples = await fetchExamplesFromGPT(word, definitions, gptLimit);
-    if (gptExamples.length > 0) {
-      allExamples.push(...gptExamples);
+    const uniqueGpt = deduplicateExamples(gptExamples, seenKeys);
+    if (uniqueGpt.length > 0) {
+      allExamples.push(...uniqueGpt);
       sources.push('GPT-4.1');
     }
   }

@@ -22,12 +22,15 @@ export async function fetchFromApi(word) {
     // Tier 1: Fetch examples from Free Dictionary API to supplement ECDICT
     let examplesByPos = await fetchExamplesFromFreeDictionary(word);
 
-    // Count total examples from Tier 1
-    const tier1Count = examplesByPos.flatMap(e => e.examples).length;
+    // Collect Tier 1 examples and count
+    const tier1Examples = examplesByPos.flatMap(e => e.examples);
+    const tier1Count = tier1Examples.length;
 
-    // Tier 2: If examples < 3, try Wordnik/Azure Dictionary for more
+    // Tier 2+: If examples < 3, try Wordnik/Azure Dictionary/GPT for more
     if (tier1Count < 3) {
-      const fallback = await fetchFallbackExamples(word, ecdictResult.definitions, tier1Count);
+      // Pass existing examples to avoid duplicates
+      const existingTexts = tier1Examples.map(e => e.en);
+      const fallback = await fetchFallbackExamples(word, ecdictResult.definitions, tier1Count, existingTexts);
       if (fallback.examples.length > 0) {
         examplesByPos.push({ partOfSpeech: 'general', examples: fallback.examples });
       }
@@ -95,12 +98,32 @@ async function fetchExamplesFromFreeDictionary(word) {
   }
 }
 
+const MAX_EXAMPLES_PER_DEF = 5;
+
 /**
- * Merge examples into word entry definitions
+ * Normalize text for comparison
+ */
+function normalizeText(text) {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Merge examples into word entry definitions (with deduplication)
  * @param {object} entry - Word entry with definitions
  * @param {Array} examplesByPos - Examples grouped by part of speech
  */
 function mergeExamples(entry, examplesByPos) {
+  // Collect all existing example texts for deduplication
+  const seenTexts = new Set();
+  for (const def of entry.definitions) {
+    for (const ex of def.examples || []) {
+      seenTexts.add(normalizeText(ex.en));
+    }
+  }
+
+  // Track which examplesByPos entries have been matched
+  const matchedPos = new Set();
+
   for (const def of entry.definitions) {
     // Initialize examples array if not present
     if (!def.examples) {
@@ -111,19 +134,41 @@ function mergeExamples(entry, examplesByPos) {
     const match = examplesByPos.find(
       e => e.partOfSpeech.toLowerCase().startsWith(def.partOfSpeech.toLowerCase())
     );
-    if (match && def.examples.length === 0) {
-      // Limit to max 5 examples per definition
-      def.examples = match.examples.slice(0, 5);
+    if (match && def.examples.length < MAX_EXAMPLES_PER_DEF) {
+      matchedPos.add(match.partOfSpeech);
+      // Append new unique examples up to the limit
+      for (const ex of match.examples) {
+        if (def.examples.length >= MAX_EXAMPLES_PER_DEF) break;
+        const normalizedText = normalizeText(ex.en);
+        if (!seenTexts.has(normalizedText)) {
+          seenTexts.add(normalizedText);
+          def.examples.push(ex);
+        }
+      }
     }
   }
 
-  // Handle 'general' examples from fallback (Wordnik)
-  // Assign to first definition without examples
-  const generalExamples = examplesByPos.find(e => e.partOfSpeech === 'general');
-  if (generalExamples) {
-    const firstDefWithoutExamples = entry.definitions.find(d => !d.examples || d.examples.length === 0);
-    if (firstDefWithoutExamples) {
-      firstDefWithoutExamples.examples = generalExamples.examples.slice(0, 3);
+  // Collect unmatched examples (including 'general' and any POS that didn't match)
+  const unmatchedExamples = [];
+  for (const pos of examplesByPos) {
+    if (!matchedPos.has(pos.partOfSpeech)) {
+      unmatchedExamples.push(...pos.examples);
+    }
+  }
+
+  // Add unmatched examples to first definition with room
+  if (unmatchedExamples.length > 0) {
+    const targetDef = entry.definitions.find(d => (d.examples?.length || 0) < MAX_EXAMPLES_PER_DEF);
+    if (targetDef) {
+      if (!targetDef.examples) targetDef.examples = [];
+      for (const ex of unmatchedExamples) {
+        if (targetDef.examples.length >= MAX_EXAMPLES_PER_DEF) break;
+        const normalizedText = normalizeText(ex.en);
+        if (!seenTexts.has(normalizedText)) {
+          seenTexts.add(normalizedText);
+          targetDef.examples.push(ex);
+        }
+      }
     }
   }
 }
@@ -234,24 +279,31 @@ const MIN_EXAMPLES = 3;
 export async function enrichWithExamples(entry) {
   if (!entry?.word) return entry;
 
-  // Count existing examples
-  const existingCount = countExamples(entry);
+  // Collect existing examples from entry
+  const existingExamples = entry.definitions?.flatMap(d => d.examples || []) || [];
+  const existingCount = existingExamples.length;
 
   // Already has enough examples, no need to fetch
   if (existingCount >= MIN_EXAMPLES) return entry;
 
+  // Build set of existing example texts for deduplication
+  const existingTexts = new Set(existingExamples.map(e => normalizeText(e.en)));
+
   // Tier 1: Fetch examples from Free Dictionary API
   let examplesByPos = await fetchExamplesFromFreeDictionary(entry.word);
 
-  // Count total examples from Tier 1
-  const tier1Count = examplesByPos.flatMap(e => e.examples).length;
+  // Count only NEW (non-duplicate) examples from Tier 1
+  const tier1Examples = examplesByPos.flatMap(e => e.examples);
+  const uniqueTier1Count = tier1Examples.filter(e => !existingTexts.has(normalizeText(e.en))).length;
 
-  // Total count including existing
-  const totalAfterTier1 = existingCount + tier1Count;
+  // Total unique count including existing
+  const totalUniqueCount = existingCount + uniqueTier1Count;
 
-  // Tier 2+: If total examples < 3, try fallback sources for more
-  if (totalAfterTier1 < MIN_EXAMPLES) {
-    const fallback = await fetchFallbackExamples(entry.word, entry.definitions, totalAfterTier1);
+  // Tier 2+: If total unique examples < 3, try fallback sources for more
+  if (totalUniqueCount < MIN_EXAMPLES) {
+    // Combine existing and tier1 examples to avoid duplicates in fallback
+    const allExistingTexts = [...existingExamples, ...tier1Examples].map(e => e.en);
+    const fallback = await fetchFallbackExamples(entry.word, entry.definitions, totalUniqueCount, allExistingTexts);
     if (fallback.examples.length > 0) {
       examplesByPos.push({ partOfSpeech: 'general', examples: fallback.examples });
     }
