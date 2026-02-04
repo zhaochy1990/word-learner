@@ -214,26 +214,31 @@ function transformApiResponse(word, apiData) {
 }
 
 /**
- * Check if a word entry has any examples
+ * Count total examples in a word entry
  * @param {object} entry - Word entry with definitions
- * @returns {boolean} - True if any definition has examples
+ * @returns {number} - Total number of examples across all definitions
  */
-function hasExamples(entry) {
-  if (!entry?.definitions) return false;
-  return entry.definitions.some(def => def.examples && def.examples.length > 0);
+function countExamples(entry) {
+  if (!entry?.definitions) return 0;
+  return entry.definitions.reduce((total, def) => total + (def.examples?.length || 0), 0);
 }
 
+const MIN_EXAMPLES = 3;
+
 /**
- * Enrich a word entry with examples (fetch if not present)
- * Used by learning session to get examples for words that don't have them
+ * Enrich a word entry with examples (fetch if fewer than MIN_EXAMPLES)
+ * Used by learning session to ensure words have enough examples
  * @param {object} entry - Word entry with definitions
  * @returns {Promise<object>} - Same entry, potentially with examples added
  */
 export async function enrichWithExamples(entry) {
   if (!entry?.word) return entry;
 
-  // Already has examples, no need to fetch
-  if (hasExamples(entry)) return entry;
+  // Count existing examples
+  const existingCount = countExamples(entry);
+
+  // Already has enough examples, no need to fetch
+  if (existingCount >= MIN_EXAMPLES) return entry;
 
   // Tier 1: Fetch examples from Free Dictionary API
   let examplesByPos = await fetchExamplesFromFreeDictionary(entry.word);
@@ -241,9 +246,12 @@ export async function enrichWithExamples(entry) {
   // Count total examples from Tier 1
   const tier1Count = examplesByPos.flatMap(e => e.examples).length;
 
-  // Tier 2: If examples < 3, try Wordnik/Azure Dictionary for more
-  if (tier1Count < 3) {
-    const fallback = await fetchFallbackExamples(entry.word, entry.definitions, tier1Count);
+  // Total count including existing
+  const totalAfterTier1 = existingCount + tier1Count;
+
+  // Tier 2+: If total examples < 3, try fallback sources for more
+  if (totalAfterTier1 < MIN_EXAMPLES) {
+    const fallback = await fetchFallbackExamples(entry.word, entry.definitions, totalAfterTier1);
     if (fallback.examples.length > 0) {
       examplesByPos.push({ partOfSpeech: 'general', examples: fallback.examples });
     }
