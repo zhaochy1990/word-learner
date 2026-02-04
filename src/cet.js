@@ -18,6 +18,20 @@ const ECDICT_PATH = join(__dirname, '..', 'node_modules/ecdict/data/dict.json');
 const CATEGORIES = ['cet4', 'cet6'];
 
 /**
+ * Shuffle an array using Fisher-Yates algorithm
+ * @param {Array} array - Array to shuffle
+ * @returns {Array} - New shuffled array
+ */
+function shuffleArray(array) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
  * Ensure data directory exists
  */
 function ensureDataDir() {
@@ -276,8 +290,8 @@ export function getWordsForLearning(category, maxNewWords = 10) {
     }
   }
 
-  // Return due words + limited new words
-  const selectedNew = newWords.slice(0, maxNewWords);
+  // Return due words + limited new words (shuffled for variety)
+  const selectedNew = shuffleArray(newWords).slice(0, maxNewWords);
   return [...dueWords, ...selectedNew];
 }
 

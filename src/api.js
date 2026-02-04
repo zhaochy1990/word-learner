@@ -22,11 +22,14 @@ export async function fetchFromApi(word) {
     // Tier 1: Fetch examples from Free Dictionary API to supplement ECDICT
     let examplesByPos = await fetchExamplesFromFreeDictionary(word);
 
-    // Tier 2: If no examples from Free Dictionary, try Wordnik
-    if (examplesByPos.length === 0) {
-      const fallback = await fetchFallbackExamples(word);
+    // Count total examples from Tier 1
+    const tier1Count = examplesByPos.flatMap(e => e.examples).length;
+
+    // Tier 2: If examples < 3, try Wordnik/Azure Dictionary for more
+    if (tier1Count < 3) {
+      const fallback = await fetchFallbackExamples(word, ecdictResult.definitions, tier1Count);
       if (fallback.examples.length > 0) {
-        examplesByPos = [{ partOfSpeech: 'general', examples: fallback.examples }];
+        examplesByPos.push({ partOfSpeech: 'general', examples: fallback.examples });
       }
     }
 
@@ -99,6 +102,11 @@ async function fetchExamplesFromFreeDictionary(word) {
  */
 function mergeExamples(entry, examplesByPos) {
   for (const def of entry.definitions) {
+    // Initialize examples array if not present
+    if (!def.examples) {
+      def.examples = [];
+    }
+
     // Match by part of speech (case-insensitive prefix match)
     const match = examplesByPos.find(
       e => e.partOfSpeech.toLowerCase().startsWith(def.partOfSpeech.toLowerCase())
@@ -113,7 +121,7 @@ function mergeExamples(entry, examplesByPos) {
   // Assign to first definition without examples
   const generalExamples = examplesByPos.find(e => e.partOfSpeech === 'general');
   if (generalExamples) {
-    const firstDefWithoutExamples = entry.definitions.find(d => d.examples.length === 0);
+    const firstDefWithoutExamples = entry.definitions.find(d => !d.examples || d.examples.length === 0);
     if (firstDefWithoutExamples) {
       firstDefWithoutExamples.examples = generalExamples.examples.slice(0, 3);
     }
@@ -205,4 +213,60 @@ function transformApiResponse(word, apiData) {
   };
 }
 
-export default { fetchFromApi };
+/**
+ * Check if a word entry has any examples
+ * @param {object} entry - Word entry with definitions
+ * @returns {boolean} - True if any definition has examples
+ */
+function hasExamples(entry) {
+  if (!entry?.definitions) return false;
+  return entry.definitions.some(def => def.examples && def.examples.length > 0);
+}
+
+/**
+ * Enrich a word entry with examples (fetch if not present)
+ * Used by learning session to get examples for words that don't have them
+ * @param {object} entry - Word entry with definitions
+ * @returns {Promise<object>} - Same entry, potentially with examples added
+ */
+export async function enrichWithExamples(entry) {
+  if (!entry?.word) return entry;
+
+  // Already has examples, no need to fetch
+  if (hasExamples(entry)) return entry;
+
+  // Tier 1: Fetch examples from Free Dictionary API
+  let examplesByPos = await fetchExamplesFromFreeDictionary(entry.word);
+
+  // Count total examples from Tier 1
+  const tier1Count = examplesByPos.flatMap(e => e.examples).length;
+
+  // Tier 2: If examples < 3, try Wordnik/Azure Dictionary for more
+  if (tier1Count < 3) {
+    const fallback = await fetchFallbackExamples(entry.word, entry.definitions, tier1Count);
+    if (fallback.examples.length > 0) {
+      examplesByPos.push({ partOfSpeech: 'general', examples: fallback.examples });
+    }
+  }
+
+  if (examplesByPos.length > 0) {
+    // Collect all English examples for batch translation
+    const allExamples = examplesByPos.flatMap(e => e.examples);
+    const translations = await translateToZh(allExamples.map(e => e.en));
+
+    // Assign translations back to examples
+    let idx = 0;
+    for (const pos of examplesByPos) {
+      for (const ex of pos.examples) {
+        ex.zh = translations[idx++];
+      }
+    }
+
+    // Merge examples into entry
+    mergeExamples(entry, examplesByPos);
+  }
+
+  return entry;
+}
+
+export default { fetchFromApi, enrichWithExamples };

@@ -41,20 +41,8 @@ export const COMMANDS = {
   },
   learn: {
     aliases: ['l'],
-    description: 'Start a learning session',
+    description: 'Start a learning session (Notebook, CET-4, CET-6)',
     usage: '/learn or /l',
-    requiresArgs: false
-  },
-  cet4: {
-    aliases: [],
-    description: 'Learn CET-4 vocabulary',
-    usage: '/cet4',
-    requiresArgs: false
-  },
-  cet6: {
-    aliases: [],
-    description: 'Learn CET-6 vocabulary',
-    usage: '/cet6',
     requiresArgs: false
   },
   progress: {

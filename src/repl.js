@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import Dictionary from './dictionary.js';
 import Notebook from './notebook.js';
 import { parseInput, COMMANDS } from './commands.js';
+import { enrichWithExamples } from './api.js';
 import {
   LearningSession,
   calculateNextReview,
@@ -37,8 +38,7 @@ import {
   displayCETFlashcardFront,
   displayCETFlashcardBack,
   displayProgressSummary,
-  displayExamples,
-  displayGradePrompt
+  displayLearnCourseMenu
 } from './ui.js';
 import {
   isExtracted,
@@ -55,6 +55,7 @@ const SelectionState = {
   NONE: null,
   WORD_ACTIONS: 'word_actions',
   NOTEBOOK_LIST: 'notebook_list',
+  LEARN_COURSE_SELECT: 'learn_course_select',
   LEARN_MENU: 'learn_menu',
   FLASHCARD_FRONT: 'flashcard_front',
   FLASHCARD_BACK: 'flashcard_back',
@@ -164,12 +165,6 @@ export class WordLearnerREPL {
       case 'learn':
         await this.handleLearn();
         break;
-      case 'cet4':
-        await this.handleCET('cet4');
-        break;
-      case 'cet6':
-        await this.handleCET('cet6');
-        break;
       case 'progress':
         this.handleProgress();
         break;
@@ -232,6 +227,9 @@ export class WordLearnerREPL {
         break;
       case SelectionState.NOTEBOOK_LIST:
         await this.handleNotebookListSelection(trimmed);
+        break;
+      case SelectionState.LEARN_COURSE_SELECT:
+        await this.handleLearnCourseSelection(trimmed);
         break;
       case SelectionState.LEARN_MENU:
         await this.handleLearnMenuSelection(trimmed);
@@ -317,21 +315,47 @@ export class WordLearnerREPL {
   }
 
   async handleLearn() {
-    const words = this.notebook.getWords();
+    // Show course selection menu
+    const notebookWords = this.notebook.getWords();
+    const cet4Available = isExtracted('cet4');
+    const cet6Available = isExtracted('cet6');
 
-    if (words.length === 0) {
-      displayNoWordsToLearn();
-      return;
+    displayLearnCourseMenu(notebookWords.length, cet4Available, cet6Available);
+
+    this.pendingSelection = SelectionState.LEARN_COURSE_SELECT;
+    this.selectionData = { notebookWords, cet4Available, cet6Available };
+  }
+
+  async handleLearnCourseSelection(input) {
+    const { notebookWords, cet4Available, cet6Available } = this.selectionData;
+
+    if (input === '1' || input === 'n') {
+      // My Notebook
+      if (notebookWords.length === 0) {
+        displayNoWordsToLearn();
+        this.clearSelection();
+        return;
+      }
+
+      const stats = this.notebook.getLearningStats();
+      const wordsForLearning = this.notebook.getWordsForLearning();
+
+      displayLearningStats(stats);
+      displayLearnPrompt(stats, wordsForLearning.length);
+
+      this.pendingSelection = SelectionState.LEARN_MENU;
+      this.selectionData = { wordsForLearning };
+    } else if (input === '2' || input === '4') {
+      // CET-4
+      await this.handleCET('cet4');
+    } else if (input === '3' || input === '6') {
+      // CET-6
+      await this.handleCET('cet6');
+    } else if (input === 'b') {
+      this.clearSelection();
+    } else {
+      console.log(chalk.dim('Press [1] Notebook, [2] CET-4, [3] CET-6, or [B] to go back'));
     }
-
-    const stats = this.notebook.getLearningStats();
-    const wordsForLearning = this.notebook.getWordsForLearning();
-
-    displayLearningStats(stats);
-    displayLearnPrompt(stats, wordsForLearning.length);
-
-    this.pendingSelection = SelectionState.LEARN_MENU;
-    this.selectionData = { wordsForLearning };
   }
 
   async handleLearnMenuSelection(input) {
@@ -378,6 +402,10 @@ export class WordLearnerREPL {
       const word = this.learningSession.currentWord;
       const { current, total } = this.learningSession.progress;
 
+      // Fetch examples if not present
+      console.log(chalk.dim('Loading...'));
+      await enrichWithExamples(word);
+
       displayFlashcardBack(word, current, total);
       this.pendingSelection = SelectionState.FLASHCARD_BACK;
     } else {
@@ -386,15 +414,6 @@ export class WordLearnerREPL {
   }
 
   async handleFlashcardBackSelection(input) {
-    // Handle 'e' for examples
-    if (input === 'e') {
-      const word = this.learningSession.currentWord;
-      displayExamples(word);
-      displayGradePrompt();
-      // Stay in FLASHCARD_BACK state
-      return;
-    }
-
     const grade = parseInt(input);
 
     if (grade >= GRADES.FORGOT && grade <= GRADES.EASY) {
@@ -419,7 +438,7 @@ export class WordLearnerREPL {
         this.rl.prompt();
       }, 800);
     } else {
-      console.log(chalk.dim('Press [E] for examples, or 1-4 to grade your recall'));
+      console.log(chalk.dim('Press 1-4 to grade your recall'));
     }
   }
 
@@ -545,6 +564,10 @@ export class WordLearnerREPL {
       const word = this.learningSession.currentWord;
       const { current, total } = this.learningSession.progress;
 
+      // Fetch examples if not present
+      console.log(chalk.dim('Loading...'));
+      await enrichWithExamples(word);
+
       displayCETFlashcardBack(word, current, total);
       this.pendingSelection = SelectionState.CET_FLASHCARD_BACK;
     } else {
@@ -557,15 +580,6 @@ export class WordLearnerREPL {
    * @param {string} input - User input
    */
   async handleCETFlashcardBackSelection(input) {
-    // Handle 'e' for examples
-    if (input === 'e') {
-      const word = this.learningSession.currentWord;
-      displayExamples(word);
-      displayGradePrompt();
-      // Stay in CET_FLASHCARD_BACK state
-      return;
-    }
-
     const grade = parseInt(input);
 
     if (grade >= GRADES.FORGOT && grade <= GRADES.EASY) {
@@ -590,7 +604,7 @@ export class WordLearnerREPL {
         this.rl.prompt();
       }, 800);
     } else {
-      console.log(chalk.dim('Press [E] for examples, or 1-4 to grade your recall'));
+      console.log(chalk.dim('Press 1-4 to grade your recall'));
     }
   }
 

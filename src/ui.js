@@ -103,9 +103,7 @@ export function displayHelp() {
   console.log(chalk.cyan('━━━ Commands ━━━'));
   console.log(chalk.white('  /search <word>  ') + chalk.dim('or') + chalk.white('  /s <word>  ') + chalk.dim('- Search for a word'));
   console.log(chalk.white('  /notebook       ') + chalk.dim('or') + chalk.white('  /n         ') + chalk.dim('- View notebook'));
-  console.log(chalk.white('  /learn          ') + chalk.dim('or') + chalk.white('  /l         ') + chalk.dim('- Start learning session'));
-  console.log(chalk.white('  /cet4                        ') + chalk.dim('- Learn CET-4 vocabulary'));
-  console.log(chalk.white('  /cet6                        ') + chalk.dim('- Learn CET-6 vocabulary'));
+  console.log(chalk.white('  /learn          ') + chalk.dim('or') + chalk.white('  /l         ') + chalk.dim('- Start learning (Notebook, CET-4, CET-6)'));
   console.log(chalk.white('  /progress       ') + chalk.dim('or') + chalk.white('  /p         ') + chalk.dim('- View learning progress'));
   console.log(chalk.white('  /history                     ') + chalk.dim('- Show search history'));
   console.log(chalk.white('  /clear          ') + chalk.dim('or') + chalk.white('  /c         ') + chalk.dim('- Clear screen'));
@@ -245,10 +243,11 @@ export function displayFlashcardBack(wordEntry, current, total) {
     console.log(chalk.green(`[${def.partOfSpeech}] `) + chalk.white(meaning));
   }
 
-  console.log();
+  // Display examples automatically
+  displayExamples(wordEntry);
+
   console.log(chalk.white('How well did you remember?'));
-  console.log(chalk.magenta('[E]xamples') + '  ' +
-              chalk.red('[1] Forgot') + '  ' +
+  console.log(chalk.red('[1] Forgot') + '  ' +
               chalk.yellow('[2] Hard') + '  ' +
               chalk.green('[3] Good') + '  ' +
               chalk.cyan('[4] Easy'));
@@ -288,12 +287,11 @@ export function displayExamples(wordEntry) {
 }
 
 /**
- * Display the grade prompt (used after showing examples)
+ * Display the grade prompt
  */
 export function displayGradePrompt() {
   console.log(chalk.white('How well did you remember?'));
-  console.log(chalk.magenta('[E]xamples') + '  ' +
-              chalk.red('[1] Forgot') + '  ' +
+  console.log(chalk.red('[1] Forgot') + '  ' +
               chalk.yellow('[2] Hard') + '  ' +
               chalk.green('[3] Good') + '  ' +
               chalk.cyan('[4] Easy'));
@@ -340,6 +338,39 @@ export function displayNoWordsToLearn() {
   console.log(chalk.yellow('No words to learn yet!'));
   console.log(chalk.dim('Search for words and save them to your notebook first.'));
   console.log();
+}
+
+/**
+ * Display course selection menu for /learn command
+ * @param {number} notebookCount - Number of words in notebook
+ * @param {boolean} cet4Available - Whether CET-4 word list is extracted
+ * @param {boolean} cet6Available - Whether CET-6 word list is extracted
+ */
+export function displayLearnCourseMenu(notebookCount, cet4Available, cet6Available) {
+  console.log();
+  console.log(chalk.cyan('━━━ Select Course ━━━'));
+  console.log();
+
+  // Option 1: Notebook
+  const notebookStatus = notebookCount > 0
+    ? chalk.dim(` (${notebookCount} words)`)
+    : chalk.dim(' (empty)');
+  console.log(chalk.white('  [1] My Notebook') + notebookStatus);
+
+  // Option 2: CET-4
+  const cet4Status = cet4Available
+    ? chalk.dim(' (ready)')
+    : chalk.dim(' (not extracted)');
+  console.log(chalk.white('  [2] CET-4 Vocabulary') + cet4Status);
+
+  // Option 3: CET-6
+  const cet6Status = cet6Available
+    ? chalk.dim(' (ready)')
+    : chalk.dim(' (not extracted)');
+  console.log(chalk.white('  [3] CET-6 Vocabulary') + cet6Status);
+
+  console.log();
+  console.log(chalk.cyan('[1-3] Select  [B]ack'));
 }
 
 // ==================== CET Learning UI ====================
@@ -467,10 +498,11 @@ export function displayCETFlashcardBack(wordEntry, current, total) {
     console.log(chalk.green(`[${def.partOfSpeech}] `) + chalk.white(meaning));
   }
 
-  console.log();
+  // Display examples automatically
+  displayExamples(wordEntry);
+
   console.log(chalk.white('How well did you remember?'));
-  console.log(chalk.magenta('[E]xamples') + '  ' +
-              chalk.red('[1] Forgot') + '  ' +
+  console.log(chalk.red('[1] Forgot') + '  ' +
               chalk.yellow('[2] Hard') + '  ' +
               chalk.green('[3] Good') + '  ' +
               chalk.cyan('[4] Easy'));
