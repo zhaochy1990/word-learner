@@ -247,7 +247,53 @@ export function displayFlashcardBack(wordEntry, current, total) {
 
   console.log();
   console.log(chalk.white('How well did you remember?'));
-  console.log(chalk.red('[1] Forgot') + '  ' +
+  console.log(chalk.magenta('[E]xamples') + '  ' +
+              chalk.red('[1] Forgot') + '  ' +
+              chalk.yellow('[2] Hard') + '  ' +
+              chalk.green('[3] Good') + '  ' +
+              chalk.cyan('[4] Easy'));
+}
+
+/**
+ * Display examples for a word entry
+ * @param {Object} wordEntry - Word entry with definitions containing examples
+ */
+export function displayExamples(wordEntry) {
+  console.log();
+  console.log(chalk.cyan('━━━ Examples ━━━'));
+  let hasExamples = false;
+
+  for (const def of wordEntry.definitions) {
+    if (def.examples && def.examples.length > 0) {
+      hasExamples = true;
+      console.log(chalk.green(`[${def.partOfSpeech}]`));
+      for (const example of def.examples) {
+        if (typeof example === 'string') {
+          console.log(chalk.white(`  • ${example}`));
+        } else {
+          console.log(chalk.white(`  • ${example.en}`));
+          if (example.zh) {
+            console.log(chalk.gray(`    ${example.zh}`));
+          }
+        }
+      }
+      console.log();
+    }
+  }
+
+  if (!hasExamples) {
+    console.log(chalk.dim('No examples available for this word.'));
+    console.log();
+  }
+}
+
+/**
+ * Display the grade prompt (used after showing examples)
+ */
+export function displayGradePrompt() {
+  console.log(chalk.white('How well did you remember?'));
+  console.log(chalk.magenta('[E]xamples') + '  ' +
+              chalk.red('[1] Forgot') + '  ' +
               chalk.yellow('[2] Hard') + '  ' +
               chalk.green('[3] Good') + '  ' +
               chalk.cyan('[4] Easy'));
@@ -423,7 +469,8 @@ export function displayCETFlashcardBack(wordEntry, current, total) {
 
   console.log();
   console.log(chalk.white('How well did you remember?'));
-  console.log(chalk.red('[1] Forgot') + '  ' +
+  console.log(chalk.magenta('[E]xamples') + '  ' +
+              chalk.red('[1] Forgot') + '  ' +
               chalk.yellow('[2] Hard') + '  ' +
               chalk.green('[3] Good') + '  ' +
               chalk.cyan('[4] Easy'));

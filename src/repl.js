@@ -36,7 +36,9 @@ import {
   displayCETMenu,
   displayCETFlashcardFront,
   displayCETFlashcardBack,
-  displayProgressSummary
+  displayProgressSummary,
+  displayExamples,
+  displayGradePrompt
 } from './ui.js';
 import {
   isExtracted,
@@ -85,7 +87,7 @@ export class WordLearnerREPL {
     });
 
     displayWelcome();
-    displayHelp();
+    this.handleProgress();
     this.rl.prompt();
 
     this.rl.on('line', async (line) => {
@@ -94,6 +96,7 @@ export class WordLearnerREPL {
     });
 
     this.rl.on('close', () => {
+      console.clear();
       console.log(chalk.dim('\nGoodbye! Happy learning!\n'));
       process.exit(0);
     });
@@ -383,6 +386,15 @@ export class WordLearnerREPL {
   }
 
   async handleFlashcardBackSelection(input) {
+    // Handle 'e' for examples
+    if (input === 'e') {
+      const word = this.learningSession.currentWord;
+      displayExamples(word);
+      displayGradePrompt();
+      // Stay in FLASHCARD_BACK state
+      return;
+    }
+
     const grade = parseInt(input);
 
     if (grade >= GRADES.FORGOT && grade <= GRADES.EASY) {
@@ -407,7 +419,7 @@ export class WordLearnerREPL {
         this.rl.prompt();
       }, 800);
     } else {
-      console.log(chalk.dim('Enter 1-4 to grade your recall'));
+      console.log(chalk.dim('Press [E] for examples, or 1-4 to grade your recall'));
     }
   }
 
@@ -545,6 +557,15 @@ export class WordLearnerREPL {
    * @param {string} input - User input
    */
   async handleCETFlashcardBackSelection(input) {
+    // Handle 'e' for examples
+    if (input === 'e') {
+      const word = this.learningSession.currentWord;
+      displayExamples(word);
+      displayGradePrompt();
+      // Stay in CET_FLASHCARD_BACK state
+      return;
+    }
+
     const grade = parseInt(input);
 
     if (grade >= GRADES.FORGOT && grade <= GRADES.EASY) {
@@ -569,7 +590,7 @@ export class WordLearnerREPL {
         this.rl.prompt();
       }, 800);
     } else {
-      console.log(chalk.dim('Enter 1-4 to grade your recall'));
+      console.log(chalk.dim('Press [E] for examples, or 1-4 to grade your recall'));
     }
   }
 
